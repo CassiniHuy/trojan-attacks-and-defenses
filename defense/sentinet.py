@@ -244,9 +244,10 @@ class SentiNet(BackdoorDefense):
         x = x.clone()
         x.requires_grad_(True)
         attr = self.gradcam.attribute(x, c)
+        top_k = max(1, int(len(attr.view(-1)) * self.cfg.mask_threshold)) # if attr.shape is too small
         threshold = torch.topk(
             attr.view(-1), 
-            k=int(len(attr.view(-1)) * self.cfg.mask_threshold))[0][-1]
+            k=top_k)[0][-1]
         mask = (attr > threshold).float()
         mask = torch.nn.functional.interpolate(mask, size=x.shape[-2:], mode='nearest')
         return mask
@@ -431,16 +432,6 @@ class SentiNet(BackdoorDefense):
 
     ''' Detect using four algorithms.
     '''
-    def obtain_features(self, imgs: List[Tensor], test_imgs: List[Tensor]) -> Tuple[List[int], List[float]]:
-        self.logger.info(f'Class proposal for {len(imgs)} images...')
-        cls_proposals = self.class_proposal(imgs)
-        self.logger.info(f'Mask generation for {len(imgs)} images...')
-        masks = self.mask_generate(imgs, cls_proposals)
-        self.logger.info(f'Testing for {len(imgs)} images on {len(test_imgs)} test images...')
-        foolded, avg_conf_ip = self.testing(imgs, test_imgs, masks)
-        assert len(foolded) == len(avg_conf_ip)
-        return foolded, avg_conf_ip
-
     def _log_results(self, 
                      x_train: List[float], y_train: List[int], 
                      x_test: List[float], y_test: List[int], 
@@ -497,26 +488,55 @@ class SentiNet(BackdoorDefense):
         plt.savefig(save_path)
         self.logger.info(f'The figure is saved into {save_path}')
 
-    def detect(self) -> dict:
-        self._log_config()
-        test_imgs = load_image_tensor(self.test_imgs[:self.cfg.test_img_num], size=self.input_size)
-        test_imgs = [img.to(self.device) for img in test_imgs]
-        self.logger.info(f'{len(test_imgs)} test images loaded.')
-        # Train model
-        self.logger.debug(f'Model training...')
-        benign_imgs = load_image_tensor(self.benign_imgs[:self.cfg.benign_img_num], self.input_size)
-        benign_imgs = [img.to(self.device) for img in benign_imgs]
+    def obtain_features(self, imgs: List[Tensor], test_imgs: List[Tensor]) -> Tuple[List[int], List[float]]:
+        self.logger.info(f'Class proposal for {len(imgs)} images...')
+        cls_proposals = self.class_proposal(imgs)
+        self.logger.info(f'Mask generation for {len(imgs)} images...')
+        masks = self.mask_generate(imgs, cls_proposals)
+        self.logger.info(f'Testing for {len(imgs)} images on {len(test_imgs)} test images...')
+        foolded, avg_conf_ip = self.testing(imgs, test_imgs, masks)
+        assert len(foolded) == len(avg_conf_ip)
+        return foolded, avg_conf_ip
+    
+    def train_on_benign(self, benign_imgs: List[Tensor], test_imgs: List[Tensor]
+                        ) -> Tuple[List[float], List[float], Callable[[float], float], float]:
         self.logger.info(f'{len(benign_imgs)} benign images loaded.')
         x_train, y_train = self.obtain_features(benign_imgs, test_imgs)
         f_curve, d = self.decision_boundary(x_train, y_train)
-        # Test model
-        self.logger.debug(f'Model testing...')
-        adv_imgs = load_image_tensor(self.adv_imgs[:self.cfg.adv_img_num], size=self.input_size)
-        adv_imgs = [img.to(self.device) for img in adv_imgs]
+        return x_train, y_train, f_curve, d
+    
+    def test_on_adv(self, f_curve: Callable[[float], float], 
+                    adv_imgs: List[Tensor], test_imgs: List[Tensor]
+                    ) -> Tuple[List[float], List[float], List[float], List[float]]:
         self.logger.info(f'{len(adv_imgs)} adv images loaded.')
         x_test, y_test = self.obtain_features(adv_imgs, test_imgs)
         y_pred = [f_curve(x) for x in x_test]
         y_thr = [self._cobyla(x, y, f_curve) for x, y in zip(x_test, y_test)]
+        return x_test, y_test, y_pred, y_thr
+    
+    def predict_on_feats(self, f_curve: Callable[[float], float], d: float, x: float, y: float) -> bool:
+        pred = f_curve(x)
+        y_d = self._cobyla(x, y, f_curve)
+        return (pred < y) and (y_d > d)
+
+    def detect(self) -> dict:
+        self._log_config()
+        test_imgs = load_image_tensor(
+            self.test_imgs[:self.cfg.test_img_num], size=self.input_size, device=self.device)
+        assert len(test_imgs) != 0
+        self.logger.info(f'{len(test_imgs)} test images loaded.')
+        # Train model
+        self.logger.debug(f'Model training...')
+        benign_imgs = load_image_tensor(
+            self.benign_imgs[:self.cfg.benign_img_num], self.input_size, device=self.device)
+        assert len(benign_imgs) != 0
+        x_train, y_train, f_curve, d = self.train_on_benign(benign_imgs, test_imgs) 
+        # Test model
+        self.logger.debug(f'Model testing...')
+        adv_imgs = load_image_tensor(
+            self.adv_imgs[:self.cfg.adv_img_num], size=self.input_size, device=self.device)
+        assert len(adv_imgs) != 0
+        x_test, y_test, y_pred, y_thr = self.test_on_adv(f_curve, adv_imgs, test_imgs)
         # Log info
         self.logger.info(f'Tested on {len(y_thr)} suspicious samples.')
         self._log_results(x_train, y_train, x_test, y_test, f_curve, d, y_pred, y_thr)

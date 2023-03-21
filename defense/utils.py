@@ -94,7 +94,8 @@ def load_image(path):
 
 def load_image_tensor(path: Union[str, List[str]],
                       size: Tuple[int] = None,
-                      norm: Tuple[Tuple[float], Tuple[float]] = None
+                      norm: Tuple[Tuple[float], Tuple[float]] = None,
+                      device: torch.device = None,
                       ) -> Union[torch.Tensor, List[torch.Tensor]]:
     """Load image tensor from paths.
 
@@ -116,6 +117,8 @@ def load_image_tensor(path: Union[str, List[str]],
         if norm is not None:
             img_tensor = transforms.Normalize(norm[0], norm[1])(img_tensor)
         tensors.append(img_tensor.unsqueeze(dim=0))
+    if device:
+        tensors = [tensor.to(device) for tensor in tensors]
     tensors = tensors if isinstance(path, list) else tensors[0]
     return tensors
 
