@@ -1,2 +1,2 @@
 from existing import defense
-from existing.defense import NeuralCleanse
+from existing.defense import NeuralCleanse, SentiNet

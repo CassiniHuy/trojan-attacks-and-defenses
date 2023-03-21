@@ -11,11 +11,11 @@ from logging import Logger
 from typing import Tuple, Callable
 from torch.utils.data import DataLoader, Dataset
 from torchvision.utils import save_image
-from .abstract import BackdoorDefense
+from .abstract import BackdoorDefense, DefenseConfig
 from .utils import AverageMeter, tanh_func, normalize_mad, to_numpy, write_json
 
 @dataclass
-class NeuralCleanseConfig:
+class NeuralCleanseConfig(DefenseConfig):
     epoch: int = 2
     lr: float = 0.002
     betas: Tuple[float] = (0.5, 0.9)
@@ -43,9 +43,26 @@ class NeuralCleanse(BackdoorDefense):
             transform: Callable[[Tensor], Tensor], 
             input_shape: Tuple[int, int, int],
             dataset: Dataset, 
-            log_path: str, logger: Logger, device: str = 'cuda') -> None:
-        super().__init__(model, transform, input_shape, dataset, log_path, logger, device)
-        self.cfg = NeuralCleanseConfig()
+            log_path: str, logger: Logger, 
+            cfg: NeuralCleanseConfig = None,
+            device: str = 'cuda') -> None:
+        """The backdoor defense method
+
+        Args:
+            model (nn.Module): The suspicious PyTorch model.
+            transform (Callable[[Tensor], Tensor]): The callable transform (including normalization).
+            input_shape (Tuple[int, int, int]): Then model input shape [in_channel, H, W].
+            dataset (Dataset): The unnormalized dataset.
+            log_path (str): The folder used to store the log files.
+            logger (Logger): The logger.
+            device (str, optional): CPU/GPU. Defaults to 'cuda'.
+        """        
+        self.model = model
+        self.transform = transform
+        self.input_shape = input_shape
+        self.dataset = dataset
+        cfg = cfg if cfg else NeuralCleanseConfig()
+        super().__init__(log_path, logger, cfg, device)
 
     def detect(self):
         self.result = {}

@@ -1,6 +1,9 @@
-import torch, os, json
+import torch, os, json, cv2
 import numpy as np
+from PIL import Image
 from torch import Tensor
+from torchvision import transforms
+from typing import Tuple, List, Union
 
 def tanh_func(x: Tensor) -> Tensor:
     return x.tanh().add(1).mul(0.5)
@@ -83,3 +86,74 @@ def makedir(path: str) -> str:
     if os.path.exists(dirname) is False:
         os.makedirs(dirname)
     return path
+
+
+def load_image(path):
+    return Image.open(path).convert('RGB')
+
+
+def load_image_tensor(path: Union[str, List[str]],
+                      size: Tuple[int] = None,
+                      norm: Tuple[Tuple[float], Tuple[float]] = None
+                      ) -> Union[torch.Tensor, List[torch.Tensor]]:
+    """Load image tensor from paths.
+
+    Args:
+        path (Union[str, List[str]]): Path str or list of paths.
+        size (Tuple[int], optional): Model input size. Defaults to None.
+        norm (Tuple[Tuple[float], Tuple[float]], optional): mean and std. Defaults to None.
+
+    Returns:
+        Union[torch.Tensor, List[torch.Tensor]]: Tensor or list of tensor, shape=[1, C, H, W].
+    """    
+    paths = path if isinstance(path, list) else [path]
+    tensors = list()
+    for img_path in paths:
+        img = load_image(img_path)
+        if size is not None:
+            img = transforms.Resize(size)(img)
+        img_tensor: Tensor = transforms.ToTensor()(img)
+        if norm is not None:
+            img_tensor = transforms.Normalize(norm[0], norm[1])(img_tensor)
+        tensors.append(img_tensor.unsqueeze(dim=0))
+    tensors = tensors if isinstance(path, list) else tensors[0]
+    return tensors
+
+
+def gen_checker_pattern(size: Tuple[int] = (224, 224), bins: int = 15, channels: int = 3) -> Tensor:
+    """Generate checker pattern.
+
+    Args:
+        size (Tuple[int], optional): Image size. Defaults to (224, 224).
+        bins (int, optional): Pattern bins. Defaults to 15.
+        channels (int, optional): Image channels. Defaults to 3.
+
+    Returns:
+        Tensor: Image tensor of shape=[1, C, H, W].
+    """    
+    pattern = torch.zeros([1, channels, *size])
+    bin_length = int(size[0] / bins)
+    assert bin_length > 0
+    for i in range(size[0]):
+        for j in range(size[1]):
+            if i % (bin_length * 2) < bin_length: 
+                if j % (bin_length * 2) < bin_length:
+                    pattern[:,:,i,j] = 1
+                else:
+                    pattern[:,:,i,j] = 0
+            else:
+                if j % (bin_length * 2) < bin_length:
+                    pattern[:,:,i,j] = 0
+                else:
+                    pattern[:,:,i,j] = 1
+    return pattern
+
+
+def gen_heatmap(img: Tensor, mask: Tensor, save_path: str):
+    im = img[0].permute(1, 2, 0).detach().cpu().numpy() * 255
+    hm = mask[0].permute(1, 2, 0).detach().cpu().numpy() * 255
+    hm = cv2.applyColorMap(np.uint8(hm), cv2.COLORMAP_JET)
+    cam = cv2.addWeighted(np.uint8(im), 0.5, hm, 0.5, 0)
+    if os.path.exists(os.path.dirname(save_path)) is False:
+        os.makedirs(os.path.dirname(save_path))
+    cv2.imwrite(save_path, cam)

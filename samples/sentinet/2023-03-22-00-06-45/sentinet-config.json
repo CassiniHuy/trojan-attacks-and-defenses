@@ -1,0 +1,18 @@
+{
+ "benign_img_num": 400,
+ "test_img_num": 100,
+ "adv_img_num": 400,
+ "enable_class_proposal": true,
+ "batch_size": 100,
+ "selective_search_scale": 500,
+ "selective_search_sigma": 0.9,
+ "selective_search_minsize": 10,
+ "selective_search_max_regions": 100,
+ "class_proposal_k": 2,
+ "mask_threshold": 0.15,
+ "inert_type": 1,
+ "inert_noise_mean": 0.0,
+ "inert_noise_std": 1.0,
+ "inert_checker_bins": 15,
+ "x_interval_size": 0.02
+}
